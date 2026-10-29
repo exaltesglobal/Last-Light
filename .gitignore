@@ -1,3 +1,5 @@
 node_modules/
 .env
 *.log
+# design exploration; the chosen direction lives in brand/
+brand-candidates/

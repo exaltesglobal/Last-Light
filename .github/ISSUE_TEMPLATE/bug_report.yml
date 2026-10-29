@@ -1,0 +1,108 @@
+name: Bug report
+description: Something in Last Light is not behaving the way the docs say it should.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A clear report is often half the fix.
+
+        Two things before you start:
+
+        - **Is this a security problem?** Anything that could expose a vault, release it early, or let fewer Lightkeepers than the threshold open it. If so, please do not file it here. Email **hello@exaltesglobal.com** instead (see SECURITY.md).
+        - **Never paste vault contents, Keeper Card codes, passwords, session cookies or values from your `.env`** anywhere in this form. Blank them out before you submit. We never need them to fix a bug.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what you saw, in plain words. Error messages are welcome; copy them exactly.
+      placeholder: "I clicked “Send test email” and the page said “Could not send” with no further detail."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: "A test email in the mailbox I set as SMTP_USER."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest path that shows the problem. If it only happens sometimes, say how often.
+      placeholder: |
+        1. Log in as the owner
+        2. Open Settings
+        3. Click “Send test email”
+        4. See the error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where does your Last Light run?
+      options:
+        - Hostinger web hosting (Node.js app in hPanel)
+        - Hostinger VPS
+        - Docker (docker compose) on another host
+        - Local development (npm start)
+        - Other (please say where under "Anything else?")
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: "Output of `node --version`, or the version selected for the app in hPanel. Last Light needs Node 20 or newer."
+      placeholder: "v22.11.0"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      description: Name and version, and whether this was on a phone or a computer. Vault encryption runs in the browser, so this matters more than usual.
+      placeholder: "Firefox 131 on Windows 11, or Safari on an iPhone 15"
+
+  - type: input
+    id: version
+    attributes:
+      label: Last Light version or commit
+      description: The version in package.json, or the short commit hash you deployed.
+      placeholder: "0.1.0"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Server output from around the time of the problem. In hPanel it is on the Node.js app page; with Docker, `docker compose logs app`; locally, the terminal running `npm start`. For anything that happens on a page, the browser console (F12, then Console) helps too.
+
+        **Before pasting, remove vault contents, Keeper Card codes, passwords, tokens and anything from `.env`.**
+      render: shell
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Anything else?
+      description: Hosting details, recent changes, screenshots (with private things blurred), or your own theory of what is going on.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched existing issues and the Troubleshooting table in docs/DEPLOY-HOSTINGER.md.
+          required: true
+        - label: This is not a security problem. If it were, I would email hello@exaltesglobal.com instead of opening an issue.
+          required: true
+        - label: I have removed vault contents, Keeper Card codes, passwords and .env values from everything above.
+          required: true

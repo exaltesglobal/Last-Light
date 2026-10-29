@@ -1,0 +1,64 @@
+name: Feature request
+description: An idea that would make Last Light more useful for an owner, a Lightkeeper or the person running the server.
+title: "[Idea]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for thinking about how Last Light could serve people better.
+
+        Two things shape what we take on:
+
+        - **It stays small on purpose.** About 2 500 lines and three runtime dependencies, so anyone can audit it and it keeps running unattended for years on cheap hosting.
+        - **The server never sees plaintext or keys.** An idea that needs the server to decrypt something is, sadly, the wrong idea for this project.
+
+        Not sure yet whether something is a bug or an idea? A thread in Discussions is a fine place to start.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation rather than the feature. Who is stuck, and what are they trying to do?
+      placeholder: "I'd like my accountant to hold a Keeper Card but see only the tax documents, not the letter to my children."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like to happen?
+      description: Your proposed solution, in as much or as little detail as you have. A sketch of the screen or the email is welcome.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: who
+    attributes:
+      label: Who does this help?
+      description: Tick all that apply.
+      options:
+        - label: The owner (the person who fills the vault and sends the signal)
+        - label: A Lightkeeper (someone holding a Keeper Card)
+        - label: The operator (whoever runs the server and the cron job)
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Other ways to get there, including doing nothing, or a workaround you use today.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Links, prior art in other tools, or how this fits the Roadmap in README.md.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I checked the Roadmap in README.md and existing issues for the same idea.
+          required: true
+        - label: As far as I can tell, this can be built without the server ever seeing plaintext or keys.
