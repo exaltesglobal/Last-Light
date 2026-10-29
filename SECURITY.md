@@ -5,7 +5,7 @@ Last Light holds the most sensitive things a person owns, so we take reports ser
 ## Reporting a problem
 
 Please **do not** open a public issue for a security problem. Email
-**security@exaltesglobal.com** with a description and, if you can, steps to reproduce.
+**hello@exaltesglobal.com** with a description and, if you can, steps to reproduce.
 We aim to reply within 3 working days and to ship a fix before any public disclosure.
 We'll credit you in the release notes unless you'd rather we didn't.
 

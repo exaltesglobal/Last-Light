@@ -190,8 +190,7 @@ If Last Light gave you peace of mind, the best thanks is a ⭐ on this repositor
 telling one person who needs it.
 
 - Website: [exaltesglobal.com](https://exaltesglobal.com)
-- Email: hello@exaltesglobal.com
-- Security: security@exaltesglobal.com
+- Email (hello, feedback, security reports): hello@exaltesglobal.com
 
 ## License
 
