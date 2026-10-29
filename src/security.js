@@ -47,6 +47,12 @@ function newPublicId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
 /**
  * Check-in links. The token is bound to the owner's last signal time, so it
  * works once: after a signal is recorded, older links stop working.
@@ -66,24 +72,31 @@ function parseSignalToken(secret, token) {
   return { ownerId: Number(m[1]), lastSignalAt: Number(m[2]) };
 }
 
-/** Small in-memory limiter: `max` hits per key per `windowMs`. Enough for one app process. */
-function rateLimiter(max, windowMs) {
+/**
+ * Small in-memory limiter: `max` hits per key per `windowMs`. Enough for one
+ * app process. Expired keys are swept at most once a minute, and the table is
+ * capped so attacker-chosen keys cannot grow it without bound.
+ */
+function rateLimiter(max, windowMs, cap = 50000) {
   const hits = new Map();
+  let lastSweep = 0;
   return function limited(key, now = Date.now()) {
     const entry = hits.get(key);
-    if (!entry || now - entry.start > windowMs) {
-      hits.set(key, { start: now, count: 1 });
-      if (hits.size > 10000) {
-        for (const [k, v] of hits) if (now - v.start > windowMs) hits.delete(k);
-      }
-      return false;
+    if (entry && now - entry.start <= windowMs) {
+      entry.count += 1;
+      return entry.count > max;
     }
-    entry.count += 1;
-    return entry.count > max;
+    if (hits.size >= cap || (hits.size > 1000 && now - lastSweep > 60 * 1000)) {
+      lastSweep = now;
+      for (const [k, v] of hits) if (now - v.start > windowMs) hits.delete(k);
+      while (hits.size >= cap) hits.delete(hits.keys().next().value); // oldest first
+    }
+    hits.set(key, { start: now, count: 1 });
+    return false;
   };
 }
 
 module.exports = {
-  hashAuthKey, verifyAuthKey, fakeSalt, newToken, sha256, newPublicId,
+  hashAuthKey, verifyAuthKey, fakeSalt, newToken, sha256, newPublicId, safeEqual,
   signalToken, parseSignalToken, rateLimiter,
 };

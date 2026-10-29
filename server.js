@@ -33,7 +33,7 @@ migrate(pool)
     app.listen(config.port, () => console.log(`${config.appName} is running on port ${config.port} (${config.baseUrl})`));
     if (config.tickMinutes > 0) {
       setTimeout(runTick, 10 * 1000);
-      setInterval(runTick, config.tickMinutes * 60 * 1000).unref();
+      setInterval(runTick, Math.min(config.tickMinutes, 1440) * 60 * 1000).unref();
     }
   })
   .catch((err) => {

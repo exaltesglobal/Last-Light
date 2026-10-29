@@ -21,9 +21,11 @@ const config = {
   allowRegistration: true,
   reminderHours: 24,
   production: false,
+  trustProxy: 1,
 };
 
 let pool, server, base, clock, mails;
+let failMail = false;
 
 async function login(email, password) {
   const { data } = await call('POST', '/api/prelogin', { body: { email } });
@@ -34,7 +36,7 @@ async function login(email, password) {
 }
 const now = () => clock;
 const log = { error() {}, info() {} };
-const mailer = { async send(m) { mails.push(m); } };
+const mailer = { async send(m) { if (failMail) throw new Error('smtp down'); mails.push(m); } };
 
 async function call(method, path, { body, cookie, headers = {} } = {}) {
   const res = await fetch(base + path, {
@@ -77,7 +79,7 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
     const { authKey, wrapKey } = await llc.deriveAccountKeys(password, salt, 1000);
     vaultKey = llc.newVaultKey();
     const r = await call('POST', '/api/register', { body: {
-      name: 'Asha', email, salt, authKey,
+      name: 'Asha', email, salt, authKey, iterations: 600000,
       wrappedKey: await llc.seal(wrapKey, vaultKey),
       ciphertext: await llc.sealJSON(vaultKey, { version: 1, letter: 'Be kind.', items: [{ id: '1', title: 'Email', body: 'pw: hunter2' }] }),
     } });
@@ -96,6 +98,7 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
     const b = await call('POST', '/api/prelogin', { body: { email: 'nobody@example.com' } });
     assert.equal(a.status, 200);
     assert.equal(a.data.salt, b.data.salt);
+    assert.equal(a.data.iterations, 600000);
   });
 
   await t.test('login works with the derived auth key only', async () => {
@@ -106,6 +109,30 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
     const r = await call('POST', '/api/login', { body: { email, authKey: good.authKey } });
     assert.equal(r.status, 200);
     cookie = r.cookie;
+  });
+
+  await t.test('vault saves carry a version; a stale save is refused', async () => {
+    let me = await call('GET', '/api/me', { cookie });
+    assert.equal(me.data.vaultVersion, 1);
+    const ct = await llc.sealJSON(vaultKey, { version: 1, letter: 'v2', items: [] });
+    let r = await call('PUT', '/api/vault', { cookie, body: { ciphertext: ct, version: 1 } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.version, 2);
+    r = await call('PUT', '/api/vault', { cookie, body: { ciphertext: ct, version: 1 } });
+    assert.equal(r.status, 409);
+    assert.equal((await call('PUT', '/api/vault', { cookie, body: { ciphertext: ct } })).status, 400);
+    me = await call('GET', '/api/me', { cookie });
+    assert.equal(me.data.vaultVersion, 2);
+  });
+
+  await t.test('bad input gets 400, not 500', async () => {
+    assert.equal((await call('PUT', '/api/keepers', { cookie, body: { threshold: 2, keepers: [null, null] } })).status, 400);
+    const longEmail = 'a@' + '.'.repeat(5000) + '@';
+    const t0 = Date.now();
+    assert.equal((await call('POST', '/api/prelogin', { body: { email: longEmail } })).status, 400);
+    assert.ok(Date.now() - t0 < 500, 'long email must be rejected quickly');
+    const res = await fetch(`${base}/api/me`, { headers: { Cookie: 'll_session=%E0%A4%A' } });
+    assert.equal(res.status, 401);
   });
 
   await t.test('no keepers yet: ticks never advance', async () => {
@@ -125,8 +152,15 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
     const keepers = [['Ravi', 'ravi@example.com'], ['Meera', 'meera@example.com'], ['Dev', 'dev@example.com']]
       .map(([name, em], i) => ({ name, email: em, shareIndex: shares[i].shareIndex, encryptedShare: shares[i].encryptedShare }));
     mails = [];
-    const r = await call('PUT', '/api/keepers', { cookie, body: { threshold: 2, keepers } });
+    // re-key: the vault moves to a fresh key that only the new cards can rebuild
+    const me0 = await call('GET', '/api/me', { cookie });
+    const r = await call('PUT', '/api/keepers', { cookie, body: {
+      threshold: 2, keepers,
+      ciphertext: await llc.sealJSON(vaultKey, { version: 1, letter: 'Be kind.', items: [{ id: '1', title: 'Email', body: 'pw: hunter2' }] }),
+      wrappedKey: me0.data.wrappedKey, version: me0.data.vaultVersion,
+    } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.version, me0.data.vaultVersion + 1);
     await new Promise((res) => setTimeout(res, 20));
     assert.equal(mails.length, 3);
     for (const m of mails) assert.doesNotMatch(m.text, /LL-[0-9A-Z]{5}-/);
@@ -181,6 +215,7 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
     const r = await call('POST', '/cron/tick', { headers: { Authorization: `Bearer ${config.cronToken}` } });
     assert.equal(r.status, 200);
     assert.equal((await call('POST', '/api/signal/token', { body: { token: '1.2.bad' } })).status, 400);
+    assert.equal((await call('GET', `/cron/tick?token=${config.cronToken}`)).status, 401, 'token in the query string is refused');
   });
 
   await t.test('lightkeepers open the vault with 2 cards, not 1', async () => {
@@ -199,7 +234,8 @@ test('whole life of a vault', { skip: !dbEnv && 'set TEST_DB_* to run' }, async 
   await t.test('released vault refuses edits and new signals', async () => {
     cookie = await login(email, password);
     assert.equal((await call('POST', '/api/signal', { cookie })).status, 409);
-    assert.equal((await call('PUT', '/api/vault', { cookie, body: { ciphertext: 'QUJD' } })).status, 409);
+    assert.equal((await call('PUT', '/api/vault', { cookie, body: { ciphertext: 'QUJD', version: 1 } })).status, 409);
+    assert.equal((await call('PUT', '/api/settings', { cookie, body: { intervalDays: 30, graceDays: 7 } })).status, 409);
   });
 });
 
@@ -241,4 +277,50 @@ test('owner signal before release resets everything', { skip: !dbEnv && 'set TES
   assert.equal(me.data.state, 'active');
   clock += 7 * DAY;
   assert.equal((await tick({ pool, mailer, config, log, now: clock })).advanced, 0);
+});
+
+test('announcements are retried until the emails go out', { skip: !dbEnv && 'set TEST_DB_* to run' }, async () => {
+  const email = 'third@example.com';
+  const salt = llc.newSalt();
+  const { authKey, wrapKey } = await llc.deriveAccountKeys('a third long password', salt, 1000);
+  const vaultKey = llc.newVaultKey();
+  let r = await call('POST', '/api/register', { body: {
+    name: 'Cy', email, salt, authKey, wrappedKey: await llc.seal(wrapKey, vaultKey), ciphertext: await llc.sealJSON(vaultKey, { version: 1, items: [] }),
+  } });
+  assert.equal(r.status, 201);
+  const cookie = r.cookie;
+  const shares = await llc.makeKeeperShares(vaultKey, 2, 2);
+  r = await call('PUT', '/api/keepers', { cookie, body: { threshold: 2, notify: false, keepers: [
+    { name: 'A', email: 'a3@example.com', shareIndex: shares[0].shareIndex, encryptedShare: shares[0].encryptedShare },
+    { name: 'B', email: 'b3@example.com', shareIndex: shares[1].shareIndex, encryptedShare: shares[1].encryptedShare },
+  ] } });
+  assert.equal(r.status, 200);
+
+  const start = clock;
+  clock = start + 30 * DAY;
+  failMail = true;
+  mails = [];
+  // (owners from earlier tests may move in the same ticks; count only Cy's mail)
+  const mine = () => mails.filter((m) => m.to === email);
+  let s = await tick({ pool, mailer, config, log, now: clock });
+  assert.ok(s.advanced >= 1);
+  assert.ok(s.errors >= 1, 'the failed send is reported');
+  assert.equal(mine().length, 0);
+
+  // mail is still down an hour later: the retry fails again, nothing is lost
+  clock += 60 * 60 * 1000;
+  s = await tick({ pool, mailer, config, log, now: clock });
+  assert.ok(s.errors >= 1);
+
+  failMail = false;
+  clock += 60 * 60 * 1000;
+  s = await tick({ pool, mailer, config, log, now: clock });
+  assert.ok(s.announced >= 1, 'the overdue email is sent once mail is back');
+  assert.equal(mine().length, 1);
+  assert.match(mine()[0].subject, /send your signal/);
+
+  // a successful announcement is not repeated
+  clock += 60 * 60 * 1000;
+  s = await tick({ pool, mailer, config, log, now: clock });
+  assert.equal(s.announced, 0);
 });

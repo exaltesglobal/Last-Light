@@ -11,6 +11,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const SESSION_DAYS = 14;
 const MAX_VAULT_CHARS = 4 * 1024 * 1024;
+const MIN_KDF_ITERATIONS = 100000;
+const MAX_KDF_ITERATIONS = 5000000;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -21,7 +23,8 @@ class HttpError extends Error {
 
 function cleanEmail(v) {
   const email = String(v || '').trim().toLowerCase();
-  if (!EMAIL_RE.test(email) || email.length > 255) throw new HttpError(400, 'Please enter a valid email address.');
+  // Length first: the regex must never see unbounded input.
+  if (email.length > 255 || !EMAIL_RE.test(email)) throw new HttpError(400, 'Please enter a valid email address.');
   return email;
 }
 
@@ -43,28 +46,38 @@ function cleanInt(v, min, max, label) {
   return n;
 }
 
+function cleanAuthKey(v) {
+  const s = String(v || '');
+  if (!/^[0-9a-f]{64}$/.test(s)) throw new HttpError(400, 'Invalid key.');
+  return s;
+}
+
+function cleanIterations(v) {
+  return cleanInt(v === undefined ? 600000 : v, MIN_KDF_ITERATIONS, MAX_KDF_ITERATIONS, 'KDF iterations');
+}
+
 function readCookie(req, name) {
   for (const part of String(req.headers.cookie || '').split(';')) {
     const [k, ...rest] = part.trim().split('=');
-    if (k === name) return decodeURIComponent(rest.join('='));
+    if (k === name) return rest.join('='); // the token is hex; no decoding needed
   }
   return null;
 }
 
 function createApp({ pool, mailer, config, log = console, now = () => Date.now() }) {
   const app = express();
-  app.set('trust proxy', 1); // Hostinger serves Node apps behind a proxy
+  app.set('trust proxy', config.trustProxy); // see TRUST_PROXY in .env.example
   app.disable('x-powered-by');
 
   app.use((req, res, next) => {
     res.set({
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'X-Frame-Options': 'DENY',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
     });
-    if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');
+    if (req.secure || config.production) res.set('Strict-Transport-Security', 'max-age=31536000');
     next();
   });
 
@@ -81,7 +94,11 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
   });
 
   const loginLimited = sec.rateLimiter(10, 15 * 60 * 1000);
+  const emailLimited = sec.rateLimiter(100, 15 * 60 * 1000);
   const anonLimited = sec.rateLimiter(60, 15 * 60 * 1000);
+  const inviteLimited = sec.rateLimiter(5, 60 * 60 * 1000);
+  // Verified against unknown emails too, so response time doesn't reveal who has an account.
+  const dummyHash = sec.hashAuthKey(sec.newToken());
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -105,7 +122,7 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
 
   const requireOwner = wrap(async (req, res, next) => {
     const token = readCookie(req, 'll_session');
-    if (!token) throw new HttpError(401, 'Please log in.');
+    if (!token || !/^[0-9a-f]{64}$/.test(token)) throw new HttpError(401, 'Please log in.');
     const [rows] = await pool.query('SELECT owner_id FROM sessions WHERE token_hash = ? AND expires_at > ?', [sec.sha256(token), now()]);
     if (!rows[0]) throw new HttpError(401, 'Your session has ended. Please log in again.');
     const owner = await loadOwner(rows[0].owner_id);
@@ -115,13 +132,18 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     next();
   });
 
-  /** Any deliberate action by the owner proves they're still here. */
-  async function recordSignal(ownerId) {
+  // Any deliberate action by the owner proves they're still here. The SQL that
+  // records it is shared with the routes that change escalation inputs, so the
+  // input change and the signal always land in one statement.
+  const SIGNAL_SQL = "last_signal_at = ?, state = 'active', state_since = ?, notified_stage = 'active', announce_claimed_at = NULL, last_reminder_at = NULL";
+
+  async function recordSignal(ownerId, extraSql = '', extraArgs = []) {
     const t = now();
-    await pool.query(
-      "UPDATE owners SET last_signal_at = ?, state = 'active', state_since = ?, last_reminder_at = NULL WHERE id = ? AND state <> 'released'",
-      [t, t, ownerId],
+    const [res] = await pool.query(
+      `UPDATE owners SET ${SIGNAL_SQL}${extraSql ? ', ' + extraSql : ''} WHERE id = ? AND state <> 'released'`,
+      [t, t, ...extraArgs, ownerId],
     );
+    if (res.affectedRows !== 1) throw new HttpError(409, 'This vault has already been released.');
   }
 
   function ownerView(owner, keepers) {
@@ -129,8 +151,10 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
       name: owner.name,
       email: owner.email,
       salt: owner.salt,
+      kdfIterations: owner.kdf_iterations,
       wrappedKey: owner.wrapped_key,
       ciphertext: owner.ciphertext,
+      vaultVersion: owner.vault_version,
       threshold: owner.threshold,
       intervalDays: owner.interval_days,
       graceDays: owner.grace_days,
@@ -144,23 +168,28 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     };
   }
 
-  // ---------- auth ----------
+  // ---------- health and status ----------
 
   app.get('/healthz', wrap(async (req, res) => {
     await pool.query('SELECT 1');
+    res.set('Cache-Control', 'no-store');
     res.json({ ok: true });
   }));
 
   app.get('/api/status', wrap(async (req, res) => {
     const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM owners');
-    res.json({ app: config.appName, registrationOpen: config.allowRegistration || n === 0 });
+    res.json({ app: config.appName, registrationOpen: config.allowRegistration || n === 0, kdfIterations: 600000 });
   }));
+
+  // ---------- auth ----------
 
   app.post('/api/prelogin', wrap(async (req, res) => {
     if (anonLimited(`pre:${req.ip}`)) throw new HttpError(429, 'Too many attempts. Please wait a few minutes.');
     const email = cleanEmail(req.body.email);
-    const [rows] = await pool.query('SELECT salt FROM owners WHERE email = ?', [email]);
-    res.json({ salt: rows[0] ? rows[0].salt : sec.fakeSalt(config.secret, email) });
+    const [rows] = await pool.query('SELECT salt, kdf_iterations FROM owners WHERE email = ?', [email]);
+    res.json(rows[0]
+      ? { salt: rows[0].salt, iterations: rows[0].kdf_iterations }
+      : { salt: sec.fakeSalt(config.secret, email), iterations: 600000 });
   }));
 
   app.post('/api/register', wrap(async (req, res) => {
@@ -171,8 +200,8 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     const email = cleanEmail(req.body.email);
     const name = cleanName(req.body.name);
     const salt = cleanB64(req.body.salt, 64, 'salt');
-    const authKey = String(req.body.authKey || '');
-    if (!/^[0-9a-f]{64}$/.test(authKey)) throw new HttpError(400, 'Invalid key.');
+    const iterations = cleanIterations(req.body.iterations);
+    const authKey = cleanAuthKey(req.body.authKey);
     const wrappedKey = cleanB64(req.body.wrappedKey, 200, 'wrapped key');
     const ciphertext = cleanB64(req.body.ciphertext, MAX_VAULT_CHARS, 'vault');
 
@@ -180,26 +209,39 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     if (exists[0]) throw new HttpError(409, 'An account with this email already exists.');
 
     const t = now();
-    const [result] = await pool.query(
-      `INSERT INTO owners (email, name, salt, auth_hash, public_id, wrapped_key, ciphertext, last_signal_at, state_since, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [email, name, salt, await sec.hashAuthKey(authKey), sec.newPublicId(), wrappedKey, ciphertext, t, t, t],
-    );
+    let result;
+    try {
+      [result] = await pool.query(
+        `INSERT INTO owners (email, name, salt, kdf_iterations, auth_hash, public_id, wrapped_key, ciphertext, last_signal_at, state_since, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [email, name, salt, iterations, await sec.hashAuthKey(authKey), sec.newPublicId(), wrappedKey, ciphertext, t, t, t],
+      );
+    } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'An account with this email already exists.');
+      throw err;
+    }
     await startSession(res, req, result.insertId);
     res.status(201).json({ ok: true });
   }));
 
   app.post('/api/login', wrap(async (req, res) => {
     const email = cleanEmail(req.body.email);
-    if (loginLimited(`login:${req.ip}`) || loginLimited(`login:${email}`)) {
+    // Per-IP buckets stop guessing; the loose per-email bucket cannot be used
+    // by a stranger to lock the owner out of their own vault.
+    if (loginLimited(`login:${req.ip}`) || loginLimited(`login:${req.ip}:${email}`) || emailLimited(`login:${email}`)) {
       throw new HttpError(429, 'Too many attempts. Please wait 15 minutes.');
     }
     const authKey = String(req.body.authKey || '');
     const [rows] = await pool.query('SELECT id, auth_hash FROM owners WHERE email = ?', [email]);
-    const ok = rows[0] && /^[0-9a-f]{64}$/.test(authKey) && (await sec.verifyAuthKey(authKey, rows[0].auth_hash));
-    if (!ok) throw new HttpError(401, 'Email or password is incorrect.');
+    const stored = rows[0] ? rows[0].auth_hash : await dummyHash;
+    const verified = /^[0-9a-f]{64}$/.test(authKey) && (await sec.verifyAuthKey(authKey, stored));
+    if (!rows[0] || !verified) throw new HttpError(401, 'Email or password is incorrect.');
     await startSession(res, req, rows[0].id);
-    await recordSignal(rows[0].id);
+    try {
+      await recordSignal(rows[0].id);
+    } catch (err) {
+      if (err.status !== 409) throw err; // a released vault can still be viewed
+    }
     res.json({ ok: true });
   }));
 
@@ -216,56 +258,83 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     res.json(ownerView(req.owner, keepers));
   }));
 
+  // Saves carry the version they were based on, so two devices can never
+  // silently overwrite each other: the second one gets a 409 and reloads.
   app.put('/api/vault', requireOwner, wrap(async (req, res) => {
     if (req.owner.state === 'released') throw new HttpError(409, 'This vault has already been released.');
     const ciphertext = cleanB64(req.body.ciphertext, MAX_VAULT_CHARS, 'vault');
-    await pool.query('UPDATE owners SET ciphertext = ? WHERE id = ?', [ciphertext, req.owner.id]);
+    const version = cleanInt(req.body.version, 1, 2147483647, 'Vault version');
+    const [result] = await pool.query(
+      "UPDATE owners SET ciphertext = ?, vault_version = vault_version + 1 WHERE id = ? AND vault_version = ? AND state <> 'released'",
+      [ciphertext, req.owner.id, version],
+    );
+    if (result.affectedRows !== 1) throw new HttpError(409, 'Your vault was changed somewhere else since you opened it. Unlock it again to load the latest version.');
     await recordSignal(req.owner.id);
-    res.json({ ok: true });
+    res.json({ ok: true, version: version + 1 });
   }));
 
   app.put('/api/settings', requireOwner, wrap(async (req, res) => {
     const intervalDays = cleanInt(req.body.intervalDays, 7, 365, 'Signal interval (days)');
     const graceDays = cleanInt(req.body.graceDays, 1, 60, 'Grace period (days)');
-    await pool.query('UPDATE owners SET interval_days = ?, grace_days = ? WHERE id = ?', [intervalDays, graceDays, req.owner.id]);
-    await recordSignal(req.owner.id);
+    await recordSignal(req.owner.id, 'interval_days = ?, grace_days = ?', [intervalDays, graceDays]);
     res.json({ ok: true });
   }));
 
-  // Replaces the whole set of Lightkeepers. Old Keeper Cards stop working,
-  // because the shares they opened are deleted here.
+  // Replaces the whole set of Lightkeepers. The browser also sends a vault
+  // re-encrypted under a fresh key, so old Keeper Cards cannot open anything
+  // even if someone kept a copy of the old database.
   app.put('/api/keepers', requireOwner, wrap(async (req, res) => {
     if (req.owner.state === 'released') throw new HttpError(409, 'This vault has already been released.');
+    if (inviteLimited(`keepers:${req.owner.id}`)) throw new HttpError(429, 'You have changed your Lightkeepers several times in the last hour. Please wait a little.');
     const list = Array.isArray(req.body.keepers) ? req.body.keepers : [];
     if (list.length < 2 || list.length > 10) throw new HttpError(400, 'Choose between 2 and 10 Lightkeepers.');
     const threshold = cleanInt(req.body.threshold, 2, list.length, 'Keepers needed');
-    const keepers = list.map((k) => ({
-      name: cleanName(k.name),
-      email: cleanEmail(k.email),
-      shareIndex: cleanInt(k.shareIndex, 1, 255, 'Share index'),
-      encryptedShare: cleanB64(k.encryptedShare, 200, 'keeper share'),
-    }));
+    const keepers = list.map((k) => {
+      if (!k || typeof k !== 'object' || Array.isArray(k)) throw new HttpError(400, 'Invalid Lightkeeper.');
+      return {
+        name: cleanName(k.name),
+        email: cleanEmail(k.email),
+        shareIndex: cleanInt(k.shareIndex, 1, 255, 'Share index'),
+        encryptedShare: cleanB64(k.encryptedShare, 200, 'keeper share'),
+      };
+    });
     if (new Set(keepers.map((k) => k.shareIndex)).size !== keepers.length) throw new HttpError(400, 'Share indexes must be unique.');
+    if (new Set(keepers.map((k) => k.email)).size !== keepers.length) throw new HttpError(400, 'Each Lightkeeper needs their own email address.');
 
+    const rekey = req.body.ciphertext !== undefined || req.body.wrappedKey !== undefined;
+    const ciphertext = rekey ? cleanB64(req.body.ciphertext, MAX_VAULT_CHARS, 'vault') : null;
+    const wrappedKey = rekey ? cleanB64(req.body.wrappedKey, 200, 'wrapped key') : null;
+    const version = rekey ? cleanInt(req.body.version, 1, 2147483647, 'Vault version') : null;
+
+    const t = now();
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+      const [upd] = await conn.query(
+        `UPDATE owners SET ${SIGNAL_SQL}, threshold = ?${rekey ? ', ciphertext = ?, wrapped_key = ?, vault_version = vault_version + 1' : ''}
+         WHERE id = ? AND state <> 'released'${rekey ? ' AND vault_version = ?' : ''}`,
+        rekey ? [t, t, threshold, ciphertext, wrappedKey, req.owner.id, version] : [t, t, threshold, req.owner.id],
+      );
+      if (upd.affectedRows !== 1) {
+        await conn.rollback();
+        throw new HttpError(409, rekey
+          ? 'Your vault was changed somewhere else since you opened it. Unlock it again to load the latest version.'
+          : 'This vault has already been released.');
+      }
       await conn.query('DELETE FROM keepers WHERE owner_id = ?', [req.owner.id]);
       for (const k of keepers) {
         await conn.query(
           'INSERT INTO keepers (owner_id, name, email, share_index, encrypted_share, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-          [req.owner.id, k.name, k.email, k.shareIndex, k.encryptedShare, now()],
+          [req.owner.id, k.name, k.email, k.shareIndex, k.encryptedShare, t],
         );
       }
-      await conn.query('UPDATE owners SET threshold = ? WHERE id = ?', [threshold, req.owner.id]);
       await conn.commit();
     } catch (err) {
-      await conn.rollback();
+      try { await conn.rollback(); } catch { /* already rolled back */ }
       throw err;
     } finally {
       conn.release();
     }
-    await recordSignal(req.owner.id);
 
     if (req.body.notify !== false) {
       for (const keeper of keepers) {
@@ -273,11 +342,10 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
         mailer.send({ to: keeper.email, ...mail }).catch((err) => log.error(`[mail] invite to keeper failed: ${err.message}`));
       }
     }
-    res.json({ ok: true });
+    res.json({ ok: true, version: rekey ? version + 1 : req.owner.vault_version });
   }));
 
   app.post('/api/signal', requireOwner, wrap(async (req, res) => {
-    if (req.owner.state === 'released') throw new HttpError(409, 'This vault has already been released.');
     await recordSignal(req.owner.id);
     res.json({ ok: true });
   }));
@@ -290,14 +358,14 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
     const ok = /^[0-9a-f]{64}$/.test(currentAuthKey) && (await sec.verifyAuthKey(currentAuthKey, req.owner.auth_hash));
     if (!ok) throw new HttpError(401, 'Your current password is incorrect.');
     const salt = cleanB64(req.body.salt, 64, 'salt');
-    const authKey = String(req.body.authKey || '');
-    if (!/^[0-9a-f]{64}$/.test(authKey)) throw new HttpError(400, 'Invalid key.');
+    const iterations = cleanIterations(req.body.iterations);
+    const authKey = cleanAuthKey(req.body.authKey);
     const wrappedKey = cleanB64(req.body.wrappedKey, 200, 'wrapped key');
-    await pool.query('UPDATE owners SET salt = ?, auth_hash = ?, wrapped_key = ? WHERE id = ?',
-      [salt, await sec.hashAuthKey(authKey), wrappedKey, req.owner.id]);
+    await pool.query('UPDATE owners SET salt = ?, kdf_iterations = ?, auth_hash = ?, wrapped_key = ? WHERE id = ?',
+      [salt, iterations, await sec.hashAuthKey(authKey), wrappedKey, req.owner.id]);
     // Sign out every other device.
     await pool.query('DELETE FROM sessions WHERE owner_id = ? AND token_hash <> ?', [req.owner.id, req.sessionHash]);
-    await recordSignal(req.owner.id);
+    try { await recordSignal(req.owner.id); } catch (err) { if (err.status !== 409) throw err; }
     res.json({ ok: true });
   }));
 
@@ -366,9 +434,10 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
   // For a Hostinger cron job, e.g. every hour:
   //   curl -fsS -H "Authorization: Bearer YOUR_CRON_TOKEN" https://your-domain/cron/tick
   // It lives outside /api so it doesn't need the browser-only request header.
+  // The token is accepted in the header only; query strings end up in logs.
   app.all('/cron/tick', wrap(async (req, res) => {
-    const given = String(req.get('Authorization') || '').replace(/^Bearer\s+/i, '') || String(req.query.token || '');
-    if (!config.cronToken || sec.sha256(given) !== sec.sha256(config.cronToken)) throw new HttpError(401, 'Bad cron token.');
+    const given = String(req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!config.cronToken || !sec.safeEqual(given, config.cronToken)) throw new HttpError(401, 'Bad cron token.');
     res.set('Cache-Control', 'no-store');
     res.json(await tick({ pool, mailer, config, log, now: now() }));
   }));
@@ -379,7 +448,7 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
   app.get('/app', (req, res) => res.sendFile(path.join(pub, 'app.html')));
   app.get('/signal', (req, res) => res.sendFile(path.join(pub, 'signal.html')));
   app.get('/r/:publicId', (req, res) => res.sendFile(path.join(pub, 'retrieve.html')));
-  app.use(express.static(pub, { extensions: ['html'], index: 'index.html' }));
+  app.use(express.static(pub, { extensions: ['html'], index: 'index.html', maxAge: '1h' }));
 
   app.use('/api', (req, res, next) => next(new HttpError(404, 'Not found.')));
 
@@ -387,7 +456,11 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
   app.use((err, req, res, next) => {
     let status = err.status || err.statusCode || 500;
     if (err.type === 'entity.too.large') status = 413;
-    if (status >= 500) log.error(err);
+    if (status >= 500) {
+      // Never log the raw error: database errors carry the full SQL with bound values.
+      const where = (err.stack || '').split('\n').slice(1, 4).map((l) => l.trim()).join(' <- ');
+      log.error(`[${req.method} ${req.path}] ${err.code || err.name || 'Error'}: ${String(err.message).slice(0, 200)} ${where}`);
+    }
     res.status(status).json({ error: status >= 500 ? 'Something went wrong on the server.' : err.message });
   });
 

@@ -29,8 +29,12 @@ function createMailer(smtp, log = console) {
 // Wording note: spam filters and ad platforms flag words about death, so the
 // copy talks about signals, going quiet and peace of mind instead.
 
+// Deadlines keep their time of day: the state machine moves at the exact
+// minute, so "by Tuesday" would promise more time than it gives.
 function fmtDate(ms) {
-  return new Date(ms).toUTCString().replace(/ \d\d:\d\d:\d\d GMT$/, '');
+  const d = new Date(ms);
+  const day = d.toUTCString().replace(/ \d\d:\d\d:\d\d GMT$/, '');
+  return `${day}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
 }
 
 // ---------- rendering ----------
@@ -133,7 +137,7 @@ const templates = {
       paragraphs: [
         `We haven't had a signal from you in a while. Please confirm you're OK, it takes one click:`,
         { button: { label: "Yes, I'm here", url: signalUrl } },
-        `If we don't hear from you by ${fmtDate(keepersAlertedAt)}, your Lightkeepers will be told you've gone quiet. Nothing is opened at that point; they're only asked to check on you.`,
+        `If we don't hear from you before ${fmtDate(keepersAlertedAt)}, your Lightkeepers will be told you've gone quiet. Nothing is opened at that point; they're only asked to check on you.`,
       ],
     });
   },
@@ -148,7 +152,7 @@ const templates = {
         `You've been quiet for a long time, so your Lightkeepers have been told and asked to check on you.`,
         `If you're OK, send your signal now and everything goes back to normal:`,
         { button: { label: "I'm here", url: signalUrl } },
-        `If we don't hear from you by ${fmtDate(releaseAt)}, your Lightkeepers will be able to open your vault together.`,
+        `If we don't hear from you before ${fmtDate(releaseAt)}, your Lightkeepers will be able to open your vault together.`,
       ],
     });
   },
