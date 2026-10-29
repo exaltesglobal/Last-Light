@@ -128,13 +128,17 @@ export async function openJSON(rawKey, sealedB64) {
  *  - wrapKey (raw bytes) never leaves the browser; it unwraps the vault key.
  */
 export async function deriveAccountKeys(password, saltB64, iterations = PBKDF2_ITERATIONS) {
-  const base = await subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  // Unicode-normalise so the same password typed on another keyboard
+  // (composed vs decomposed accents, Indic conjuncts) derives the same keys.
+  const base = await subtle.importKey('raw', enc.encode(String(password).normalize('NFKC')), 'PBKDF2', false, ['deriveBits']);
   const bits = new Uint8Array(await subtle.deriveBits(
     { name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(saltB64), iterations },
     base,
     512,
   ));
-  return { authKey: toHex(bits.subarray(0, 32)), wrapKey: bits.slice(32) };
+  const keys = { authKey: toHex(bits.subarray(0, 32)), wrapKey: bits.slice(32) };
+  bits.fill(0);
+  return keys;
 }
 
 export function newSalt() {
@@ -193,6 +197,9 @@ export async function openKeeperShares(codeTexts, encryptedShares) {
   return { shares: [...opened.values()], unmatched };
 }
 
+/** Rebuilds the vault key and scrubs the shares, which are as sensitive as the key itself. */
 export function rebuildVaultKey(shares) {
-  return combine(shares);
+  const key = combine(shares);
+  for (const s of shares) s.fill(0);
+  return key;
 }

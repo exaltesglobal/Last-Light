@@ -1,0 +1,37 @@
+{
+  "dark": {
+    "bg": "#0e0d12",
+    "surface": "#17161d",
+    "text": "#f3ede4",
+    "muted": "#a39c92",
+    "accent": "#f1b45b",
+    "accentStrong": "#ffc978",
+    "danger": "#e9918a",
+    "ok": "#8fc49d",
+    "line": "#2a2833"
+  },
+  "light": {
+    "bg": "#f7f3ec",
+    "surface": "#fffdf9",
+    "text": "#1b1a20",
+    "muted": "#6a645c",
+    "accent": "#9a5d12",
+    "accentStrong": "#6e420b",
+    "danger": "#a93f35",
+    "ok": "#2f6e43",
+    "line": "#e4dcd0"
+  },
+  "extras": {
+    "sun": "#f1b45b",
+    "sunTop": "#ffd98f",
+    "sunBase": "#eb9c3e",
+    "sunTopOnLight": "#f4b85c",
+    "sunBaseOnLight": "#dd8d33",
+    "duskDeep": "#221c30",
+    "duskMauve": "#4a2d3a",
+    "duskEmber": "#c2642b",
+    "paper": "#f7f3ec",
+    "ink": "#1b1a20"
+  },
+  "notes": "WCAG contrast (computed): dark.text on bg = 16.63:1; dark.text on surface = 15.44:1; dark.muted on bg = 7.12:1; dark.muted on surface = 6.61:1; dark.accent on bg = 10.53:1; dark.accent on surface = 9.77:1; dark.accentStrong on bg = 12.79:1; dark.accentStrong on surface = 11.87:1; dark.danger on bg = 8.19:1; dark.danger on surface = 7.60:1; dark.ok on bg = 9.72:1; dark.ok on surface = 9.03:1; light.text on bg = 15.62:1; light.text on surface = 17.01:1; light.muted on bg = 5.29:1; light.muted on surface = 5.76:1; light.accent on bg = 4.81:1; light.accent on surface = 5.23:1; light.accentStrong on bg = 7.76:1; light.accentStrong on surface = 8.45:1; light.danger on bg = 5.50:1; light.danger on surface = 5.99:1; light.ok on bg = 5.53:1; light.ok on surface = 6.02:1; dark.text-on-accent(button) on accent = 10.53:1; light.ink-on-amber(button) on #f1b45b = 9.40:1; dark.line on bg = 1.34:1; light.line on bg = 1.23:1. Body text and muted text clear AA (4.5:1) on both bg and surface in both themes; text and accents on dark clear AAA. accent/accentStrong in the light theme are the burnished ambers that pass AA as text/links on paper; the brand amber #f1b45b itself is reserved on light surfaces for fills (buttons with ink text, 9.4:1) and the sun. Sun gradient: #ffd98f -> #eb9c3e on dark, #f4b85c -> #dd8d33 on light. Glow: #f1b45b at 55% -> 0 (dark), 30% -> 0 (light). Dusk sky (hero only, never behind body text): #0e0d12 -> #221c30 -> #4a2d3a -> #c2642b at the horizon."
+}

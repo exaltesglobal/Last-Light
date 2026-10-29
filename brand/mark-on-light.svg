@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Last Light">
+  <title>Last Light mark</title>
+  <defs>
+    <linearGradient id="ll-sun" gradientUnits="userSpaceOnUse" x1="0" y1="20" x2="0" y2="36">
+      <stop offset="0" stop-color="#f4b85c"/>
+      <stop offset="1" stop-color="#dd8d33"/>
+    </linearGradient>
+    <radialGradient id="ll-glow" gradientUnits="userSpaceOnUse" cx="32" cy="36" r="30" gradientTransform="translate(32 36) scale(1 .68) translate(-32 -36)">
+      <stop offset="0" stop-color="#f1b45b" stop-opacity=".30"/>
+      <stop offset=".55" stop-color="#f1b45b" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#f1b45b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="36" fill="url(#ll-glow)"/>
+  <path d="M10.834 36A22 22 0 0 1 53.166 36Z" fill="url(#ll-sun)"/>
+  <path d="M4 36h56v8H4z" fill="#1b1a20"/>
+</svg>

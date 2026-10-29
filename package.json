@@ -10,6 +10,7 @@
   },
   "scripts": {
     "start": "node server.js",
+    "setup": "node setup.js",
     "test": "node --test \"test/**/*.test.*\""
   },
   "dependencies": {

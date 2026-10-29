@@ -42,14 +42,14 @@ function fmtDate(ms) {
 // Colours for the HTML version. Kept here, in one place, so the brand can be
 // changed without touching the templates.
 const THEME = {
-  page: '#f4f1ea',
-  card: '#ffffff',
-  ink: '#1b1b1f',
-  muted: '#6b6f78',
-  line: '#e6e1d6',
-  dark: '#0d1117',
-  accent: '#f5b94a',
-  accentInk: '#1b1305',
+  page: '#f7f3ec',
+  card: '#fffdf9',
+  ink: '#1b1a20',
+  muted: '#6a645c',
+  line: '#e4dcd0',
+  dark: '#0e0d12',
+  accent: '#f1b45b',
+  accentInk: '#1b1a20',
 };
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

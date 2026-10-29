@@ -9,7 +9,8 @@ function view(name) {
 }
 
 function codeInput() {
-  const input = h('input', { class: 'code-input', placeholder: 'LL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters' });
+  const n = document.querySelectorAll('.code-input').length + 1;
+  const input = h('input', { class: 'code-input', 'aria-label': `Keeper Card code ${n}`, placeholder: 'LL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'characters' });
   input.addEventListener('input', updateLights);
   return input;
 }
@@ -84,6 +85,7 @@ $('#codes-form').addEventListener('submit', (e) => {
     } finally {
       key.fill(0);
     }
+    for (const i of document.querySelectorAll('.code-input')) i.value = '';
     renderOpen(vault);
   }, 'Opening…');
 });
@@ -92,9 +94,11 @@ $('#codes-form').addEventListener('submit', (e) => {
   try {
     data = await api('GET', `/api/retrieve/${encodeURIComponent(publicId)}`);
   } catch (err) {
-    if (err.status === 404) return view('missing');
     view('missing');
-    $('#view-missing .lead').textContent = err.message;
+    if (err.status !== 404) {
+      $('#view-missing h1').textContent = 'Something went wrong';
+      $('#view-missing .lead').textContent = `${err.message} You can simply reload this page and try again.`;
+    }
     return;
   }
   if (!data.released) return view('sealed');

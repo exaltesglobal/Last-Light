@@ -2,25 +2,32 @@ import * as llc from './llcrypto.js';
 import { h, $, show, message, api, busy, fmtDate, relDays, download, itemsToText } from './ui.js';
 
 const AUTO_LOCK_MS = 15 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
+const SEEN_KEY = 'll:seen';
 
 const STARTER = [
   ['Accounts & passwords', 'Main email account', 'Email address:\nPassword:\nRecovery phone / backup codes:\n\nThis unlocks most other accounts through "forgot password".'],
   ['Devices', 'Phone and laptop', 'Phone passcode:\nLaptop password:\nPassword manager master password:'],
   ['Money & investments', 'Bank accounts', 'Bank / branch:\nAccount numbers:\nNominee:\nInternet banking login:'],
   ['Documents & insurance', 'Insurance policies', 'Insurer:\nPolicy numbers:\nAgent / helpline:\nWhere the papers are:'],
-  ['Documents & insurance', 'Important documents', 'Where to find: property papers, will, ID documents, tax returns…'],
-  ['Money & investments', 'Investments and crypto', 'Demat / broker:\nMutual funds:\nCrypto wallets (how to access, NOT the seed phrase if you prefer to keep it elsewhere):'],
+  ['Documents & insurance', 'Important documents', 'Where to find: property papers, ID documents, tax returns…'],
+  ['Money & investments', 'Investments and crypto', 'Demat / broker:\nMutual funds:\nCrypto wallets (how to access; keep the seed phrase elsewhere if you prefer):'],
   ['Instructions & wishes', 'Subscriptions to cancel', 'Streaming, cloud storage, gym, domains, hosting…'],
-  ['Instructions & wishes', 'People to contact', 'Lawyer / CA / employer / close friends and how to reach them:'],
+  ['Instructions & wishes', 'People to contact', 'Lawyer / accountant / employer / close friends and how to reach them:'],
 ].map(([category, title, body]) => ({ category, title, body }));
 
 const state = {
   me: null,
   vaultKey: null,
+  wrapKey: null,
   vault: null, // { version, letter, items: [{ id, category, title, forWhom, body }] }
+  vaultVersion: 0,
+  loadedLetter: '',
   editingId: null,
   registrationOpen: false,
   lockTimer: null,
+  saveQueue: Promise.resolve(),
+  cardsVisible: false,
 };
 
 const views = ['loading', 'auth', 'unlock', 'released', 'dash'];
@@ -31,6 +38,13 @@ function view(name) {
   show($('#lock-btn'), name === 'dash' && !!state.vaultKey);
 }
 
+function seen() {
+  try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; }
+}
+function markSeen() {
+  try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private mode */ }
+}
+
 // ---------- session ----------
 
 async function refreshMe() {
@@ -38,44 +52,108 @@ async function refreshMe() {
   return state.me;
 }
 
-async function openVault(password) {
-  const { wrapKey } = await llc.deriveAccountKeys(password, state.me.salt);
+/** Opens the vault with already-derived keys, or derives them from the password. */
+async function openVault({ password, wrapKey }) {
+  if (!wrapKey) ({ wrapKey } = await llc.deriveAccountKeys(password, state.me.salt, state.me.kdfIterations));
   try {
     state.vaultKey = await llc.open(wrapKey, state.me.wrappedKey);
   } catch {
+    wrapKey.fill(0);
     throw new Error('That password is not right.');
   }
-  state.vault = await llc.openJSON(state.vaultKey, state.me.ciphertext);
+  state.wrapKey = wrapKey;
+  try {
+    state.vault = await llc.openJSON(state.vaultKey, state.me.ciphertext);
+  } catch {
+    throw new Error('Your vault data could not be decrypted. If this keeps happening, restore the database from a backup.');
+  }
   state.vault.items ||= [];
   state.vault.letter ||= '';
-  startAutoLock();
+  state.vaultVersion = state.me.vaultVersion;
+  state.loadedLetter = state.vault.letter;
+  armAutoLock();
   showDashboard();
 }
 
-function lock() {
+function lock(reason) {
+  if (state.cardsVisible) return; // never destroy unsaved Keeper Cards
   if (state.vaultKey) state.vaultKey.fill(0);
+  if (state.wrapKey) state.wrapKey.fill(0);
   state.vaultKey = null;
+  state.wrapKey = null;
   state.vault = null;
+  state.editingId = null;
+  // Leave no plaintext behind in the hidden dashboard.
+  $('#items').replaceChildren();
+  $('#letter-body').value = '';
+  $('#item-form').reset();
+  show($('#item-form'), false);
   $('#cards').replaceChildren();
   show($('#cards-section'), false);
+  for (const el of document.querySelectorAll('#view-dash input, #view-dash textarea')) {
+    if (el.type !== 'checkbox' && el.type !== 'number' && el.type !== 'email' && !el.classList.contains('k-name')) el.value = '';
+  }
   $('#unlock-password').value = '';
   view('unlock');
+  message($('#unlock-msg'), reason || '', 'warn');
 }
 
-function startAutoLock() {
-  const reset = () => {
-    clearTimeout(state.lockTimer);
-    if (state.vaultKey) state.lockTimer = setTimeout(lock, AUTO_LOCK_MS);
-  };
-  for (const ev of ['click', 'keydown', 'pointermove']) document.addEventListener(ev, reset, { passive: true });
-  reset();
+function armAutoLock() {
+  clearTimeout(state.lockTimer);
+  if (state.vaultKey) state.lockTimer = setTimeout(() => (state.cardsVisible ? armAutoLock() : lock('Locked after 15 minutes without activity.')), AUTO_LOCK_MS);
 }
+for (const ev of ['click', 'keydown', 'pointermove']) document.addEventListener(ev, armAutoLock, { passive: true });
 
-async function saveVault() {
-  const ciphertext = await llc.sealJSON(state.vaultKey, state.vault);
-  await api('PUT', '/api/vault', { ciphertext });
-  await refreshMe();
+window.addEventListener('beforeunload', (e) => {
+  if (state.cardsVisible) {
+    e.preventDefault();
+    e.returnValue = 'Your Keeper Cards have not been saved yet.';
+  }
+});
+
+// A 401 from any call means the session ended: show the login form, not a dead end.
+window.addEventListener('ll:unauthorized', (e) => {
+  if (!state.me) return;
+  const email = state.me.email;
+  state.me = null;
+  if (state.vaultKey) { state.cardsVisible = false; lock(); }
+  view('auth');
+  authTab('login');
+  $('#login-email').value = email || '';
+  message($('#login-msg'), e.detail || 'Your session has ended. Please log in again.', 'warn');
+});
+
+function localSignal() {
+  const me = state.me;
+  if (!me || me.state === 'released') return;
+  const t = Date.now();
+  me.lastSignalAt = t;
+  me.state = 'active';
+  me.signalDueAt = t + me.intervalDays * DAY;
+  me.keepersAlertedAt = me.signalDueAt + me.graceDays * DAY;
+  me.releaseAt = me.keepersAlertedAt + me.graceDays * DAY;
   renderStatus();
+}
+
+/** Saves run one after another, each on top of the previous version. */
+function saveVault() {
+  const run = state.saveQueue.then(async () => {
+    const ciphertext = await llc.sealJSON(state.vaultKey, state.vault);
+    try {
+      const res = await api('PUT', '/api/vault', { ciphertext, version: state.vaultVersion });
+      state.vaultVersion = res.version;
+      state.loadedLetter = state.vault.letter;
+      localSignal();
+    } catch (err) {
+      if (err.status === 409 && /changed somewhere else/.test(err.message)) {
+        state.cardsVisible = false;
+        lock(err.message);
+      }
+      throw err;
+    }
+  });
+  state.saveQueue = run.catch(() => {});
+  return run;
 }
 
 // ---------- auth views ----------
@@ -93,13 +171,14 @@ $('#login-form').addEventListener('submit', (e) => {
   busy(btn, $('#login-msg'), async () => {
     const email = $('#login-email').value.trim().toLowerCase();
     const password = $('#login-password').value;
-    const { salt } = await api('POST', '/api/prelogin', { email });
-    const { authKey } = await llc.deriveAccountKeys(password, salt);
+    const { salt, iterations } = await api('POST', '/api/prelogin', { email });
+    const { authKey, wrapKey } = await llc.deriveAccountKeys(password, salt, iterations);
     await api('POST', '/api/login', { email, authKey });
+    markSeen();
     await refreshMe();
-    if (state.me.state === 'released') return showReleased();
-    await openVault(password);
     $('#login-password').value = '';
+    if (state.me.state === 'released') return showReleased();
+    await openVault({ wrapKey });
   }, 'Unlocking…');
 });
 
@@ -113,15 +192,17 @@ $('#register-form').addEventListener('submit', (e) => {
     if (password.length < 12) throw new Error('Please use at least 12 characters.');
     if (password !== $('#reg-password2').value) throw new Error('The two passwords are different.');
     const salt = llc.newSalt();
-    const { authKey, wrapKey } = await llc.deriveAccountKeys(password, salt);
+    const iterations = llc.PBKDF2_ITERATIONS;
+    const { authKey, wrapKey } = await llc.deriveAccountKeys(password, salt, iterations);
     const vaultKey = llc.newVaultKey();
     const wrappedKey = await llc.seal(wrapKey, vaultKey);
     const ciphertext = await llc.sealJSON(vaultKey, { version: 1, letter: '', items: [] });
-    await api('POST', '/api/register', { name, email, salt, authKey, wrappedKey, ciphertext });
+    await api('POST', '/api/register', { name, email, salt, iterations, authKey, wrappedKey, ciphertext });
+    markSeen();
     await refreshMe();
-    await openVault(password);
     $('#reg-password').value = '';
     $('#reg-password2').value = '';
+    await openVault({ wrapKey });
   }, 'Creating your vault…');
 });
 
@@ -130,17 +211,23 @@ $('#unlock-form').addEventListener('submit', (e) => {
   const btn = e.submitter || $('#unlock-form button[type=submit]');
   busy(btn, $('#unlock-msg'), async () => {
     await refreshMe();
-    await openVault($('#unlock-password').value);
+    if (state.me.state === 'released') return showReleased();
+    await openVault({ password: $('#unlock-password').value });
     $('#unlock-password').value = '';
   }, 'Unlocking…');
 });
 
 $('#logout-btn').addEventListener('click', async () => {
+  if (state.cardsVisible && !confirm('Your Keeper Cards have not been saved. Log out anyway?')) return;
+  state.cardsVisible = false;
   try { await api('POST', '/api/logout'); } catch { /* already logged out */ }
   location.reload();
 });
 
-$('#lock-btn').addEventListener('click', lock);
+$('#lock-btn').addEventListener('click', () => {
+  if (state.cardsVisible) return alert('Save or print your Keeper Cards first.');
+  lock();
+});
 
 for (const b of document.querySelectorAll('[data-auth-tab]')) b.addEventListener('click', () => authTab(b.dataset.authTab));
 
@@ -158,7 +245,9 @@ function showDashboard() {
   show($('#signal-btn'), true);
   renderStatus();
   renderItems();
-  $('#letter-body').value = state.vault.letter;
+  const draft = $('#letter-body').value;
+  if (!draft || draft === state.loadedLetter) $('#letter-body').value = state.vault.letter;
+  else message($('#letter-msg'), 'You have an unsaved draft of your letter from before the lock.', 'warn');
   renderKeepers();
   renderSettings();
 }
@@ -205,7 +294,7 @@ $('#signal-btn').addEventListener('click', (e) => {
     await api('POST', '/api/signal');
     await refreshMe();
     renderStatus();
-    message($('#setup-hint'), 'Signal received. Thank you — see you next time.', 'ok');
+    message($('#setup-hint'), 'Signal received. Thank you, see you next time.', 'ok');
   }, 'Sending…');
 });
 
@@ -218,14 +307,15 @@ function renderItems() {
   if (!items.length) {
     box.append(h('div', { class: 'empty' },
       h('p', {}, 'Your vault is empty.'),
-      h('p', {}, 'Start with the starter checklist — it covers what families most often struggle to find.')));
+      h('p', {}, 'Start with the starter checklist. It covers what families most often struggle to find.')));
     return;
   }
   for (const it of items) {
     const body = h('pre', { class: 'hidden' }, it.body || '');
-    const toggle = h('button', { class: 'btn small', type: 'button', onclick: () => {
+    const toggle = h('button', { class: 'btn small', type: 'button', 'aria-expanded': 'false', onclick: () => {
       const hidden = body.classList.toggle('hidden');
       toggle.textContent = hidden ? 'Show' : 'Hide';
+      toggle.setAttribute('aria-expanded', String(!hidden));
     } }, 'Show');
     box.append(h('article', { class: 'item' },
       h('div', { class: 'item-head' },
@@ -241,7 +331,7 @@ function renderItems() {
 
 function editItem(id) {
   const it = state.vault.items.find((x) => x.id === id);
-  state.editingId = id || null;
+  state.editingId = it ? id : null;
   $('#item-form-title').textContent = it ? 'Edit item' : 'New item';
   $('#item-title').value = it ? it.title : '';
   $('#item-category').value = it ? it.category : 'Accounts & passwords';
@@ -254,20 +344,24 @@ function editItem(id) {
 async function deleteItem(id) {
   const it = state.vault.items.find((x) => x.id === id);
   if (!it || !confirm(`Delete "${it.title}"?`)) return;
-  const before = state.vault.items;
-  state.vault.items = before.filter((x) => x.id !== id);
+  if (state.editingId === id) {
+    state.editingId = null;
+    show($('#item-form'), false);
+  }
+  const removed = it;
+  state.vault.items = state.vault.items.filter((x) => x.id !== id);
+  renderItems();
   try {
     await saveVault();
     message($('#vault-msg'), 'Item deleted.', 'ok');
   } catch (err) {
-    state.vault.items = before;
+    if (state.vault) { state.vault.items = [...state.vault.items, removed]; renderItems(); }
     message($('#vault-msg'), err.message);
   }
-  renderItems();
 }
 
 $('#add-item-btn').addEventListener('click', () => editItem(null));
-$('#item-cancel').addEventListener('click', () => show($('#item-form'), false));
+$('#item-cancel').addEventListener('click', () => { state.editingId = null; show($('#item-form'), false); });
 
 $('#item-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -281,6 +375,7 @@ $('#item-form').addEventListener('submit', (e) => {
     };
     const before = state.vault.items;
     if (state.editingId) {
+      if (!before.some((x) => x.id === state.editingId)) throw new Error('This item no longer exists.');
       state.vault.items = before.map((x) => (x.id === state.editingId ? { ...x, ...data } : x));
     } else {
       state.vault.items = [...before, { id: crypto.randomUUID(), ...data }];
@@ -288,9 +383,10 @@ $('#item-form').addEventListener('submit', (e) => {
     try {
       await saveVault();
     } catch (err) {
-      state.vault.items = before;
+      if (state.vault) state.vault.items = before;
       throw err;
     }
+    state.editingId = null;
     show($('#item-form'), false);
     renderItems();
     message($('#vault-msg'), 'Saved and encrypted.', 'ok');
@@ -307,7 +403,7 @@ $('#starter-btn').addEventListener('click', (e) => {
     try {
       await saveVault();
     } catch (err) {
-      state.vault.items = before;
+      if (state.vault) state.vault.items = before;
       throw err;
     }
     renderItems();
@@ -331,7 +427,7 @@ $('#letter-save').addEventListener('click', (e) => {
     try {
       await saveVault();
     } catch (err) {
-      state.vault.letter = before;
+      if (state.vault) state.vault.letter = before;
       throw err;
     }
     message($('#letter-msg'), 'Your letter is saved and encrypted.', 'ok');
@@ -341,9 +437,10 @@ $('#letter-save').addEventListener('click', (e) => {
 // ---------- lightkeepers ----------
 
 function keeperRow(name = '', email = '') {
+  const n = document.querySelectorAll('.keeper-row').length + 1;
   const row = h('div', { class: 'keeper-row' },
-    h('div', {}, h('label', {}, 'Name'), h('input', { class: 'k-name', maxlength: '120', value: name, required: true })),
-    h('div', {}, h('label', {}, 'Email'), h('input', { class: 'k-email', type: 'email', value: email, required: true })),
+    h('div', {}, h('label', {}, 'Name'), h('input', { class: 'k-name', 'aria-label': `Lightkeeper ${n} name`, maxlength: '120', value: name, required: true })),
+    h('div', {}, h('label', {}, 'Email'), h('input', { class: 'k-email', 'aria-label': `Lightkeeper ${n} email`, type: 'email', value: email, required: true })),
     h('button', { class: 'btn small danger', type: 'button', onclick: () => {
       if (document.querySelectorAll('.keeper-row').length <= 2) return;
       row.remove();
@@ -382,7 +479,7 @@ function renderKeepers() {
   const codes = $('#rehearse-codes');
   codes.replaceChildren();
   for (let i = 0; i < Math.max(me.threshold, 2); i++) {
-    codes.append(h('input', { class: 'r-code', placeholder: 'LL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX', autocomplete: 'off', spellcheck: 'false' }));
+    codes.append(h('input', { class: 'r-code', 'aria-label': `Keeper Card code ${i + 1}`, placeholder: 'LL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXXX', autocomplete: 'off', spellcheck: 'false' }));
   }
 }
 
@@ -405,13 +502,26 @@ $('#keepers-form').addEventListener('submit', (e) => {
     const threshold = Number($('#threshold').value);
     if (state.me.keepers.length && !confirm('This replaces your current Lightkeepers. Their old Keeper Cards will stop working. Continue?')) return;
 
-    const shares = await llc.makeKeeperShares(state.vaultKey, people.length, threshold);
+    // The vault moves to a fresh key, so cards from a previous set can never
+    // open it, not even from an old backup of the database.
+    const newKey = llc.newVaultKey();
+    const shares = await llc.makeKeeperShares(newKey, people.length, threshold);
     const keepers = people.map((p, i) => ({ ...p, shareIndex: shares[i].shareIndex, encryptedShare: shares[i].encryptedShare }));
-    await api('PUT', '/api/keepers', { threshold, keepers, notify: $('#notify-keepers').checked });
-    await refreshMe();
-    renderStatus();
-    renderKeepers();
+    const ciphertext = await llc.sealJSON(newKey, state.vault);
+    const wrappedKey = await llc.seal(state.wrapKey, newKey);
+    const res = await api('PUT', '/api/keepers', {
+      threshold, keepers, ciphertext, wrappedKey, version: state.vaultVersion, notify: $('#notify-keepers').checked,
+    });
+    // From here on the cards are the only copy of the codes: show them first.
+    state.vaultKey.fill(0);
+    state.vaultKey = newKey;
+    state.vaultVersion = res.version;
     showCards(people, shares, threshold);
+    try {
+      await refreshMe();
+      renderStatus();
+      renderKeepers();
+    } catch { /* the cards are on screen; the rest can wait for a reload */ }
   }, 'Creating cards…');
 });
 
@@ -420,13 +530,17 @@ function showCards(people, shares, threshold) {
   box.replaceChildren();
   people.forEach((p, i) => {
     box.append(h('div', { class: 'keeper-card' },
-      h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }), 'Last Light · Keeper Card'),
-      h('p', {}, `For ${p.name}, from ${state.me.name}`),
+      h('div', { class: 'keeper-card-head' },
+        h('span', { class: 'brand' }, h('span', { class: 'brand-mark', 'aria-hidden': 'true' }), 'Last Light'),
+        h('span', { class: 'label' }, 'Keeper Card')),
+      h('p', { class: 'keeper-card-for' }, h('strong', {}, `For ${p.name},`), ' ', h('em', {}, `from ${state.me.name}`)),
       h('div', { class: 'code' }, shares[i].codeText),
-      h('p', { class: 'muted' },
+      h('p', { class: 'keeper-card-note' },
         `Keep this card safe and private. If ${state.me.name} ever goes quiet for a long time, you'll get an email from ${location.host} with a link. ` +
         `${threshold} Lightkeepers must enter their codes together to open what was left for you.`)));
   });
+  state.cardsVisible = true;
+  document.body.classList.add('printing-cards');
   show($('#cards-section'), true);
   $('#cards-section').scrollIntoView({ behavior: 'smooth' });
 }
@@ -436,6 +550,8 @@ $('#done-cards').addEventListener('click', () => {
   if (!confirm('Have you printed or copied every card? They won\'t be shown again.')) return;
   $('#cards').replaceChildren();
   show($('#cards-section'), false);
+  state.cardsVisible = false;
+  document.body.classList.remove('printing-cards');
 });
 
 $('#rehearse-btn').addEventListener('click', (e) => {
@@ -449,6 +565,7 @@ $('#rehearse-btn').addEventListener('click', (e) => {
     const rebuilt = llc.rebuildVaultKey(shares);
     const same = rebuilt.length === state.vaultKey.length && rebuilt.every((b, i) => b === state.vaultKey[i]);
     rebuilt.fill(0);
+    for (const i of document.querySelectorAll('.r-code')) i.value = '';
     if (!same) throw new Error('These cards did not rebuild your vault key. Please create new Keeper Cards.');
     message($('#rehearse-msg'), 'It works. These cards can open your vault.', 'ok');
   }, 'Testing…');
@@ -498,16 +615,21 @@ $('#password-form').addEventListener('submit', (e) => {
     const next = $('#pw-new').value;
     if (next.length < 12) throw new Error('Please use at least 12 characters.');
     if (next !== $('#pw-new2').value) throw new Error('The two new passwords are different.');
-    const old = await llc.deriveAccountKeys(current, state.me.salt);
+    const old = await llc.deriveAccountKeys(current, state.me.salt, state.me.kdfIterations);
     try {
       await llc.open(old.wrapKey, state.me.wrappedKey);
     } catch {
       throw new Error('Your current password is incorrect.');
+    } finally {
+      old.wrapKey.fill(0);
     }
     const salt = llc.newSalt();
-    const fresh = await llc.deriveAccountKeys(next, salt);
+    const iterations = llc.PBKDF2_ITERATIONS;
+    const fresh = await llc.deriveAccountKeys(next, salt, iterations);
     const wrappedKey = await llc.seal(fresh.wrapKey, state.vaultKey);
-    await api('PUT', '/api/password', { currentAuthKey: old.authKey, salt, authKey: fresh.authKey, wrappedKey });
+    await api('PUT', '/api/password', { currentAuthKey: old.authKey, salt, iterations, authKey: fresh.authKey, wrappedKey });
+    if (state.wrapKey) state.wrapKey.fill(0);
+    state.wrapKey = fresh.wrapKey;
     await refreshMe();
     for (const id of ['#pw-current', '#pw-new', '#pw-new2']) $(id).value = '';
     message($('#password-msg'), 'Password changed. Other devices have been signed out.', 'ok');
@@ -519,8 +641,9 @@ $('#delete-form').addEventListener('submit', (e) => {
   const btn = e.submitter || $('#delete-form button[type=submit]');
   busy(btn, $('#delete-msg'), async () => {
     if (!confirm('Delete your vault and everything in it, forever?')) return;
-    const { authKey } = await llc.deriveAccountKeys($('#delete-password').value, state.me.salt);
+    const { authKey } = await llc.deriveAccountKeys($('#delete-password').value, state.me.salt, state.me.kdfIterations);
     await api('DELETE', '/api/account', { currentAuthKey: authKey });
+    state.cardsVisible = false;
     location.href = '/';
   }, 'Deleting…');
 });
@@ -538,6 +661,7 @@ $('#delete-form').addEventListener('submit', (e) => {
     else view('unlock');
   } catch {
     view('auth');
-    authTab(state.registrationOpen && location.hash !== '#login' ? 'register' : 'login');
+    const wantsLogin = location.hash === '#login' || seen();
+    authTab(state.registrationOpen && !wantsLogin ? 'register' : 'login');
   }
 })();

@@ -102,13 +102,36 @@ yourdomain.com {
 Add the same hourly cron job as in route A, step 6, so ticks run even if the container
 restarts rarely.
 
+### Guided setup
+
+On a VPS (or your own machine) you don't have to write `.env` by hand. The setup wizard
+asks for each value with sensible defaults, tests the database and the mailbox, generates
+`APP_SECRET` and `CRON_TOKEN`, writes `.env` readable only by you, and prints the exact
+cron command to paste:
+
+```bash
+npm install
+npm run setup            # answer the questions; Enter keeps the value in [brackets]
+node setup.js --check    # later: validates .env, the database and SMTP; exit code 1 on problems
+```
+
+With Docker the database only appears on the first `docker compose up`, so when the
+wizard's connection test fails, choose *continue anyway*: compose creates the database
+from your `DB_*` answers and swaps `DB_HOST` for `db` by itself.
+
+For unattended installs, `node setup.js --non-interactive` builds `.env` from environment
+variables without asking anything and generates whatever secrets are missing.
+`LAST_LIGHT_ENV_FILE=/path/to/.env` points the wizard, `--check` and the app at a
+different file.
+
 ---
 
 ## Updating
 
 Route A: push to your branch, or click **Redeploy** in hPanel. Route B:
 `git pull && docker compose up -d --build`. Database changes are applied automatically
-on start.
+on start. After an update, `node setup.js --check` tells you if the new version needs a
+setting your `.env` doesn't have yet.
 
 ## Backups
 

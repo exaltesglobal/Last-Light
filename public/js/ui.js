@@ -27,22 +27,31 @@ export function message(el, text, kind = 'error') {
   el.replaceChildren();
   if (!text) return show(el, false);
   el.className = `msg ${kind}`;
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   el.textContent = text;
   show(el, true);
 }
 
 export async function api(method, url, body) {
-  const res = await fetch(url, {
-    method,
-    credentials: 'same-origin',
-    headers: body === undefined ? { 'X-Last-Light': '1' } : { 'Content-Type': 'application/json', 'X-Last-Light': '1' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      credentials: 'same-origin',
+      headers: body === undefined ? { 'X-Last-Light': '1' } : { 'Content-Type': 'application/json', 'X-Last-Light': '1' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    const err = new Error('Could not reach the server. Check your connection and try again.');
+    err.status = 0;
+    throw err;
+  }
   let data = {};
   try { data = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {
-    const err = new Error(data.error || `Request failed (${res.status})`);
+    const err = new Error(data.error || (res.status >= 500 ? 'Something went wrong on the server. Please try again.' : `Request failed (${res.status})`));
     err.status = res.status;
+    if (res.status === 401) window.dispatchEvent(new CustomEvent('ll:unauthorized', { detail: err.message }));
     throw err;
   }
   return data;
