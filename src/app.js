@@ -305,11 +305,7 @@ function createApp({ pool, mailer, config, log = console, now = () => Date.now()
   app.post('/api/test-email', requireOwner, wrap(async (req, res) => {
     if (anonLimited(`mail:${req.owner.id}`)) throw new HttpError(429, 'Too many test emails. Please wait a few minutes.');
     try {
-      await mailer.send({
-        to: req.owner.email,
-        subject: `${config.appName}: test email`,
-        text: `Hi ${req.owner.name},\n\nThis is a test from ${config.appName}. If you're reading it, signal reminders will reach you too.\n\nTip: add this address to your contacts so reminders never land in spam.\n\n— ${config.appName}`,
-      });
+      await mailer.send({ to: req.owner.email, ...templates.testEmail({ app: config.appName, owner: req.owner }) });
     } catch (err) {
       log.error(`[mail] test email failed: ${err.message}`);
       throw new HttpError(502, 'The email could not be sent. Check the SMTP settings on the server.');
