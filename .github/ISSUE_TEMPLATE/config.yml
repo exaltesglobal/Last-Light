@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security problem
-    url: "mailto:hello@exaltesglobal.com"
-    about: "Please don't open a public issue. Email us instead; we aim to reply within 3 working days and to ship a fix before any disclosure."
+    url: "https://github.com/exaltesglobal/Last-Light/security/policy"
+    about: "Please don't open a public issue. Email hello@exaltesglobal.com instead; we aim to reply within 3 working days and to fix before any disclosure."
   - name: Question or idea
     url: "https://github.com/exaltesglobal/Last-Light/discussions"
     about: "Ask how something works, share how you run Last Light, or float an idea before it becomes an issue."
