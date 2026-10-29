@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Retrieval · Last Light</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/retrieve.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar"><a class="brand" href="/"><span class="brand-mark"></span>Last Light</a></header>
+
+    <main id="view-loading" class="hero"><p class="muted">Loading…</p></main>
+
+    <main id="view-sealed" class="hero hidden">
+      <h1>This vault is still sealed</h1>
+      <p class="lead">Its owner hasn't gone quiet, so there is nothing to open. If you're a Lightkeeper, keep your Keeper Card safe. You'll get an email if that ever changes.</p>
+    </main>
+
+    <main id="view-missing" class="hero hidden">
+      <h1>Nothing here</h1>
+      <p class="lead">This link isn't valid. Please check you copied the whole address from the email.</p>
+    </main>
+
+    <main id="view-codes" class="hidden">
+      <section class="hero">
+        <h1><span id="owner-name"></span> left something for you</h1>
+        <p class="lead">You're a Lightkeeper. Enter the codes from <strong id="need-count"></strong> Keeper Cards, including yours. Agree with the other Lightkeepers who will enter them — on a call, in person, or by message.</p>
+      </section>
+      <form id="codes-form" class="card stack">
+        <div class="lights" id="lights" aria-hidden="true"></div>
+        <div id="code-inputs" class="stack"></div>
+        <div class="row"><button class="btn small" type="button" id="more-codes">Add another code</button></div>
+        <p class="hint">Codes start with "LL-". Capital letters, spaces and dashes don't matter. Nothing you type here is sent anywhere: the vault is opened in this browser.</p>
+        <div id="codes-msg" class="hidden"></div>
+        <button class="btn primary" type="submit">Open the vault</button>
+      </form>
+    </main>
+
+    <main id="view-open" class="hidden">
+      <section class="hero">
+        <h1>With love, from <span id="owner-name-2"></span></h1>
+        <p class="lead muted">Released <span id="released-at"></span>. Take your time.</p>
+      </section>
+      <div class="row no-print" id="open-toolbar">
+        <button class="btn" id="print-btn" type="button">Print</button>
+        <button class="btn" id="download-btn" type="button">Download as text</button>
+      </div>
+      <section id="letter-section" class="card stack hidden">
+        <h2>A letter</h2>
+        <div id="letter" class="letter-view"></div>
+      </section>
+      <section id="open-items" class="stack"></section>
+    </main>
+
+    <footer>Last Light opened this vault on your device. Its owner set it up for you.</footer>
+  </div>
+</body>
+</html>

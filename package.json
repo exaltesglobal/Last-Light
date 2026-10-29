@@ -1,0 +1,36 @@
+{
+  "name": "last-light",
+  "version": "0.1.0",
+  "description": "Self-hosted digital legacy vault. When you go dark, they'll still see the way.",
+  "main": "server.js",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.*\""
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mysql2": "^3.11.5",
+    "nodemailer": "^10.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/exaltesglobal/last-light.git"
+  },
+  "homepage": "https://github.com/exaltesglobal/last-light#readme",
+  "author": "Agape Labs, Exaltes Global Private Limited",
+  "keywords": [
+    "digital-legacy",
+    "dead-mans-switch",
+    "shamir-secret-sharing",
+    "self-hosted",
+    "end-to-end-encryption",
+    "hostinger",
+    "inheritance",
+    "vault"
+  ]
+}

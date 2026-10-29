@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My vault · Last Light</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark"></span>Last Light</a>
+      <div class="row">
+        <button class="btn small hidden" id="lock-btn" type="button">Lock</button>
+        <button class="btn small hidden" id="logout-btn" type="button">Log out</button>
+      </div>
+    </header>
+
+    <main id="view-loading" class="hero"><p class="muted">Loading…</p></main>
+
+    <!-- Log in / create account -->
+    <main id="view-auth" class="hidden">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-auth-tab="login" aria-selected="true">Log in</button>
+        <button type="button" role="tab" data-auth-tab="register" aria-selected="false" id="register-tab">Create my vault</button>
+      </div>
+
+      <form id="login-form" class="card stack">
+        <h2>Welcome back</h2>
+        <div><label for="login-email">Email</label><input id="login-email" type="email" autocomplete="username" required></div>
+        <div><label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password" required></div>
+        <div id="login-msg" class="hidden"></div>
+        <button class="btn primary" type="submit">Log in and send my signal</button>
+        <p class="hint">Logging in also counts as your signal.</p>
+      </form>
+
+      <form id="register-form" class="card stack hidden">
+        <h2>Create your vault</h2>
+        <div id="register-closed" class="msg warn hidden">New accounts are turned off on this server. Ask whoever runs it, or run your own copy.</div>
+        <div><label for="reg-name">Your name</label><input id="reg-name" autocomplete="name" maxlength="120" required><p class="hint">Your Lightkeepers will see this in emails.</p></div>
+        <div><label for="reg-email">Email</label><input id="reg-email" type="email" autocomplete="username" required><p class="hint">Signal reminders go here.</p></div>
+        <div><label for="reg-password">Password</label><input id="reg-password" type="password" autocomplete="new-password" minlength="12" required><p class="hint">At least 12 characters. A short sentence works well.</p></div>
+        <div><label for="reg-password2">Repeat password</label><input id="reg-password2" type="password" autocomplete="new-password" minlength="12" required></div>
+        <div class="msg warn">Nobody can reset this password, not even the server. If you forget it, your vault can't be opened by you — only by your Lightkeepers after a release.</div>
+        <label class="row"><input id="reg-ack" type="checkbox" class="checkbox" required> <span>I understand and have stored my password safely.</span></label>
+        <div id="register-msg" class="hidden"></div>
+        <button class="btn primary" type="submit">Create my vault</button>
+      </form>
+    </main>
+
+    <!-- Unlock (logged in, key not in memory) -->
+    <main id="view-unlock" class="hidden">
+      <form id="unlock-form" class="card stack">
+        <h2>Unlock your vault</h2>
+        <p class="muted">Your vault is locked on this device. Enter your password to open it. It never leaves your browser.</p>
+        <div><label for="unlock-password">Password</label><input id="unlock-password" type="password" autocomplete="current-password" required></div>
+        <div id="unlock-msg" class="hidden"></div>
+        <button class="btn primary" type="submit">Unlock</button>
+      </form>
+    </main>
+
+    <!-- Released -->
+    <main id="view-released" class="hidden">
+      <div class="card stack">
+        <h2>This vault has been released</h2>
+        <p class="muted">No signal was received, so your Lightkeepers can now open this vault. It can't be edited any more. If this was a mistake, delete the account from the Account tab below and create a new vault with new Keeper Cards.</p>
+      </div>
+    </main>
+
+    <!-- Dashboard -->
+    <main id="view-dash" class="hidden">
+      <section class="card status" id="status-card">
+        <div>
+          <div class="row"><strong id="status-title">Your signal</strong> <span class="pill" id="status-pill"></span></div>
+          <p class="muted" id="status-text"></p>
+        </div>
+        <button class="btn primary" id="signal-btn" type="button">Send my signal</button>
+      </section>
+      <div id="setup-hint" class="msg warn hidden"></div>
+
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="vault" aria-selected="true">Vault</button>
+        <button type="button" role="tab" data-tab="letter" aria-selected="false">Letter</button>
+        <button type="button" role="tab" data-tab="keepers" aria-selected="false">Lightkeepers</button>
+        <button type="button" role="tab" data-tab="signal" aria-selected="false">Signal</button>
+        <button type="button" role="tab" data-tab="account" aria-selected="false">Account</button>
+      </div>
+
+      <!-- Vault -->
+      <section data-panel="vault" class="stack">
+        <div class="row" id="vault-toolbar">
+          <button class="btn primary" id="add-item-btn" type="button">Add an item</button>
+          <button class="btn" id="starter-btn" type="button">Add a starter checklist</button>
+          <button class="btn" id="export-btn" type="button">Download a copy</button>
+        </div>
+        <div id="vault-msg" class="hidden"></div>
+        <form id="item-form" class="card stack hidden">
+          <h3 id="item-form-title">New item</h3>
+          <div><label for="item-title">Title</label><input id="item-title" maxlength="200" placeholder="e.g. Gmail account, Bank locker, Life insurance" required></div>
+          <div><label for="item-category">Category</label>
+            <select id="item-category">
+              <option>Accounts &amp; passwords</option>
+              <option>Money &amp; investments</option>
+              <option>Documents &amp; insurance</option>
+              <option>Devices</option>
+              <option>Instructions &amp; wishes</option>
+              <option>Personal</option>
+            </select>
+          </div>
+          <div><label for="item-for">Who is this for? <span class="hint">(optional)</span></label><input id="item-for" maxlength="200" placeholder="e.g. My wife, My accountant, Everyone"></div>
+          <div><label for="item-body">Details</label><textarea id="item-body" placeholder="Usernames, passwords, where things are, what to do…"></textarea></div>
+          <div class="row">
+            <button class="btn primary" type="submit">Save item</button>
+            <button class="btn" type="button" id="item-cancel">Cancel</button>
+          </div>
+        </form>
+        <div id="items" class="stack"></div>
+      </section>
+
+      <!-- Letter -->
+      <section data-panel="letter" class="stack hidden">
+        <div class="card stack">
+          <h3>A letter for the people you love</h3>
+          <p class="muted">Write whatever you'd want them to read. It's encrypted like everything else and shown first when your vault is opened.</p>
+          <textarea id="letter-body" class="letter" placeholder="Dear…"></textarea>
+          <div id="letter-msg" class="hidden"></div>
+          <button class="btn primary" id="letter-save" type="button">Save letter</button>
+        </div>
+      </section>
+
+      <!-- Lightkeepers -->
+      <section data-panel="keepers" class="stack hidden">
+        <div class="card stack">
+          <h3>Your Lightkeepers</h3>
+          <div id="keepers-current"></div>
+        </div>
+
+        <form id="keepers-form" class="card stack">
+          <h3 id="keepers-form-title">Choose your Lightkeepers</h3>
+          <p class="muted">Pick people who know each other or can find each other. Each one gets a Keeper Card from you. To open the vault, a number of them — you choose how many — must enter their codes together.</p>
+          <div id="keeper-rows" class="stack"></div>
+          <div class="row"><button class="btn small" type="button" id="add-keeper-row">Add another person</button></div>
+          <div><label for="threshold">How many must come together to open the vault?</label><select id="threshold"></select>
+            <p class="hint">More is safer against misuse; fewer is safer against lost cards. For 3–5 people, 2 or 3 is a good choice.</p></div>
+          <label class="row"><input id="notify-keepers" type="checkbox" class="checkbox" checked> <span>Email each person to say they've been chosen (no codes are emailed)</span></label>
+          <div id="keepers-msg" class="hidden"></div>
+          <button class="btn primary" type="submit">Create Keeper Cards</button>
+        </form>
+
+        <section id="cards-section" class="stack hidden">
+          <div class="msg warn no-print">Print or copy these cards now. They're shown only once and the server can't recover them. Give each person their own card, in person if you can.</div>
+          <div class="row no-print"><button class="btn primary" id="print-cards" type="button">Print cards</button><button class="btn" id="done-cards" type="button">I've saved them</button></div>
+          <div id="cards" class="keeper-cards"></div>
+        </section>
+
+        <details class="card">
+          <summary><strong>Rehearse a retrieval</strong></summary>
+          <div class="stack">
+            <p class="muted">Check your Keeper Cards work before you ever need them. Enter codes from enough cards; nothing is sent to the server.</p>
+            <div id="rehearse-codes" class="stack"></div>
+            <div id="rehearse-msg" class="hidden"></div>
+            <button class="btn" id="rehearse-btn" type="button">Test these codes</button>
+          </div>
+        </details>
+      </section>
+
+      <!-- Signal -->
+      <section data-panel="signal" class="stack hidden">
+        <form id="settings-form" class="card stack">
+          <h3>How often should we check on you?</h3>
+          <div><label for="interval-days">Ask for my signal every (days)</label><input id="interval-days" type="number" min="7" max="365" required></div>
+          <div><label for="grace-days">Grace period (days)</label><input id="grace-days" type="number" min="1" max="60" required>
+            <p class="hint">After a missed signal we remind you daily for this long, then alert your Lightkeepers, then wait this long again before releasing.</p></div>
+          <p class="muted" id="settings-summary"></p>
+          <div id="settings-msg" class="hidden"></div>
+          <button class="btn primary" type="submit">Save</button>
+        </form>
+        <div class="card stack">
+          <h3>Make sure reminders reach you</h3>
+          <p class="muted">Every warning comes by email. Send yourself a test and add the sender to your contacts.</p>
+          <div id="test-email-msg" class="hidden"></div>
+          <button class="btn" id="test-email-btn" type="button">Send a test email</button>
+        </div>
+      </section>
+
+      <!-- Account -->
+      <section data-panel="account" class="stack hidden">
+        <form id="password-form" class="card stack">
+          <h3>Change password</h3>
+          <div><label for="pw-current">Current password</label><input id="pw-current" type="password" autocomplete="current-password" required></div>
+          <div><label for="pw-new">New password</label><input id="pw-new" type="password" autocomplete="new-password" minlength="12" required></div>
+          <div><label for="pw-new2">Repeat new password</label><input id="pw-new2" type="password" autocomplete="new-password" minlength="12" required></div>
+          <p class="hint">Your Keeper Cards keep working. Other devices are signed out.</p>
+          <div id="password-msg" class="hidden"></div>
+          <button class="btn primary" type="submit">Change password</button>
+        </form>
+        <form id="delete-form" class="card stack">
+          <h3>Delete my vault</h3>
+          <p class="muted">This permanently deletes your vault, your Lightkeepers and all data on this server. It can't be undone.</p>
+          <div><label for="delete-password">Password</label><input id="delete-password" type="password" autocomplete="current-password" required></div>
+          <div id="delete-msg" class="hidden"></div>
+          <button class="btn danger" type="submit">Delete everything</button>
+        </form>
+      </section>
+    </main>
+
+    <footer>Everything in your vault is encrypted in this browser. The server can't read it.</footer>
+  </div>
+</body>
+</html>

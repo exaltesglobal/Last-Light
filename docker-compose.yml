@@ -1,0 +1,33 @@
+# Last Light + MariaDB for a VPS. Put your settings in .env first (see .env.example).
+# DB_HOST must be "db" and the DB_* values below must match your .env.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      PORT: 3000
+    ports:
+      - "127.0.0.1:3000:3000"   # put Nginx/Caddy with HTTPS in front
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      retries: 10
+
+volumes:
+  db-data:

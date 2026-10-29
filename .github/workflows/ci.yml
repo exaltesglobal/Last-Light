@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: lastlight_test
+          MARIADB_USER: ll
+          MARIADB_PASSWORD: llpass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_USER: ll
+          TEST_DB_PASSWORD: llpass
+          TEST_DB_NAME: lastlight_test
+      - name: App boots and answers /healthz
+        run: |
+          APP_SECRET=$(openssl rand -hex 32) CRON_TOKEN=$(openssl rand -hex 16) \
+          DB_HOST=127.0.0.1 DB_USER=ll DB_PASSWORD=llpass DB_NAME=lastlight_test \
+          BASE_URL=http://127.0.0.1:3000 TICK_MINUTES=0 node server.js &
+          sleep 3
+          curl -fsS http://127.0.0.1:3000/healthz
+          curl -fsS http://127.0.0.1:3000/ >/dev/null
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t last-light .
