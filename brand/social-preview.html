@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Fraunces"; font-weight: 300; src: url("../public/fonts/fraunces-latin-300-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Fraunces"; font-weight: 300; font-style: italic; src: url("../public/fonts/fraunces-latin-300-italic.woff2") format("woff2"); }
+  @font-face { font-family: "DM Sans"; font-weight: 400; src: url("../public/fonts/dm-sans-latin-400-normal.woff2") format("woff2"); }
+  html, body { margin: 0; }
+  body { width: 1280px; height: 640px; overflow: hidden; position: relative; color: #f3ede4; font-family: "DM Sans", sans-serif;
+    background: linear-gradient(180deg, #0e0d12 0%, #221c30 45%, #4a2d3a 74%, #c2642b 100%); }
+  .sun { position: absolute; left: 50%; bottom: 0; width: 520px; height: 260px; margin-left: -260px; border-radius: 260px 260px 0 0;
+    background: linear-gradient(#ffd98f, #eb9c3e); box-shadow: 0 0 120px 50px rgba(241,180,91,.5), 0 0 300px 120px rgba(241,180,91,.25); }
+  .horizon { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: #f3ede4; }
+  .text { position: absolute; left: 0; right: 0; top: 96px; text-align: center; }
+  .label { font-size: 18px; letter-spacing: .14em; text-transform: uppercase; color: #d9d0c3; margin-bottom: 22px; }
+  h1 { font: 300 112px/1 "Fraunces", Georgia, serif; margin: 0 0 22px; letter-spacing: -0.01em; }
+  .tag { font: italic 300 38px/1.3 "Fraunces", Georgia, serif; }
+  .claims { position: absolute; left: 0; right: 0; bottom: 36px; text-align: center; font-size: 20px; color: #f3ede4; letter-spacing: .02em; }
+</style>
+</head>
+<body>
+  <div class="sun"></div>
+  <div class="horizon"></div>
+  <div class="text">
+    <div class="label">Self-hosted · Encrypted in your browser · Open source</div>
+    <h1>Last Light</h1>
+    <div class="tag">When you go dark, they'll still see the way.</div>
+  </div>
+  <div class="claims">A private vault that opens for the people you trust if you ever go quiet · MIT · Runs on a $3 hosting plan</div>
+</body>
+</html>

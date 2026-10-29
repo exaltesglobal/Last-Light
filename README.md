@@ -101,12 +101,15 @@ curl -fsS -H "Authorization: Bearer $CRON_TOKEN" https://yourdomain.com/cron/tic
 
 Prefer Docker? `cp .env.example .env && docker compose up -d`.
 
-Running locally:
+Running locally or on a VPS:
 
 ```bash
-npm install && cp .env.example .env   # set DB_* and APP_SECRET; leave SMTP_HOST empty
-npm start                             # emails print to the console
+npm install
+npm run setup     # asks for each setting, tests the database and SMTP, writes .env
+npm start
 ```
+
+`node setup.js --check` validates an existing installation at any time.
 
 ## Security
 
@@ -171,6 +174,13 @@ test/                  node --test
 - [ ] Hostinger one-click template
 
 Ideas and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Brand
+
+The visual identity ("Horizon": the last sliver of sun on a horizon line), palette, type
+and voice rules live in [brand/README.md](brand/README.md). Please keep the vocabulary
+(Vault, Lightkeepers, Keeper Card, Signal, going dark, Last Light) and the voice rules
+when you fork, translate or write about the project.
 
 ## About Agape Labs
 
